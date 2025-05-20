@@ -1,46 +1,68 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import path from "path";
+import fs from "fs";
+
+// Routes
 import generateRoute from "./routes/generate";
+
+// Middleware
 import { verifyCloudRunToken } from "./middleware/authMiddleware";
-import { storeUserToken } from "./services/tokenService";
+
+// Services
+import { storeUserToken } from "./services/notifications";
 
 // Load environment configuration
-dotenv.config({ path: ".env.production" });
+dotenv.config();
 
+// Create Express app
 const app = express();
 
-// CORS configuration - MUST come before routes
+// Ensure uploads directory exists
+const uploadsDir = path.join(__dirname, "../uploads");
+const processedDir = path.join(__dirname, "../processed");
+
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+if (!fs.existsSync(processedDir)) {
+  fs.mkdirSync(processedDir, { recursive: true });
+}
+
+// CORS configuration
 const corsOptions = {
-  origin: true, // Allow all origins, or specify allowed origins as array
+  origin: true, // Allow all origins in development
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-API-Key"],
   credentials: true,
   optionsSuccessStatus: 200,
   preflightContinue: false,
-  maxAge: 86400,
+  maxAge: 86400, // 24 hours
 };
 
-// Apply CORS middleware
+// Apply global middleware
 app.use(cors(corsOptions));
-
-// Handle OPTIONS requests explicitly
-app.options("*", cors(corsOptions));
-
-// Body parsing middleware
+app.options("*", cors(corsOptions)); // Handle OPTIONS requests explicitly
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // Health check (no auth required)
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
+  res.json({ 
+    status: "healthy", 
+    service: "pixmix-backend",
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || "development"
+  });
 });
 
-// Protected routes - Make sure generateRoute is a valid router
+// Protected routes - Image processing
 app.use("/generate", verifyCloudRunToken, generateRoute);
 
-// Token registration endpoint
-app.post("/register-token", async (req, res): Promise<any> => {
+// FCM token registration endpoint
+app.post("/register-token", verifyCloudRunToken, async (req, res, next) => {
   try {
     const { userId, fcmToken, platform } = req.body;
 
@@ -51,23 +73,25 @@ app.post("/register-token", async (req, res): Promise<any> => {
     }
 
     // Validate the FCM token format (basic check)
-    if (typeof fcmToken !== 'string' || fcmToken.length < 10) {
+    if (typeof fcmToken !== "string" || fcmToken.length < 10) {
       return res.status(400).json({
         error: "Invalid FCM token format",
       });
     }
 
-    await storeUserToken(userId, fcmToken, platform);
+    await storeUserToken(userId, fcmToken, platform || "ios");
 
     res.json({
       success: true,
       message: "Token registered successfully",
     });
   } catch (error) {
-    console.error("Token registration error:", error);
-    res.status(500).json({ error: "Failed to register token" });
+    next(error);
   }
 });
-
-const PORT = 3000;
-app.listen(PORT, () => console.log(`Filter Backend running on port ${PORT}`));
+// Start server
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => {
+  console.log(`PixMix Backend running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
+});

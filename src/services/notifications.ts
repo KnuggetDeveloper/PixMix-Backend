@@ -1,162 +1,133 @@
-/**
- * Notification Service with Exponential Backoff
- * Handles FCM notifications from the backend to the frontend
- */
 import fetch from "node-fetch";
-import dotenv from "dotenv";
-import { getUserToken } from "./tokenService";
-
-// Load environment variables
-dotenv.config();
-
-// Auth service URL for getting FCM tokens
-const AUTH_SERVICE_URL = "http://localhost:4000";
+import { getFCMAuthToken } from "../utils/google-auth";
 
 // FCM API URL
-const FCM_API_URL =
-  "https://fcm.googleapis.com/v1/projects/pixmix-6a12e/messages:send";
+const FCM_API_URL = `https://fcm.googleapis.com/v1/projects/${process.env.FIREBASE_PROJECT_ID}/messages:send`;
 
 /**
- * Gets an FCM authorization token from the auth service
- * @returns Promise with the FCM token
- */
-async function getFCMAuthToken(): Promise<string> {
-  try {
-    const url = AUTH_SERVICE_URL + "/auth/fcm-token";
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      throw new Error(`Failed to get FCM token: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data.token;
-  } catch (error) {
-    console.error("Error getting FCM auth token:", error);
-    throw error;
-  }
-}
-
-/**
- * Sleep function for delays
- */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Sends an FCM notification with exponential backoff retry
- */
-async function sendNotificationWithRetry(
-  messageBody: any,
-  maxRetries: number = 3
-): Promise<any> {
-  let lastError: Error | null = null;
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      // Get fresh token for each retry in case it expired
-      const fcmToken = await getFCMAuthToken();
-
-      // Send to FCM
-      const response = await fetch(FCM_API_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${fcmToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(messageBody),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`FCM error: ${JSON.stringify(errorData)}`);
-      }
-
-      // Success!
-      return await response.json();
-    } catch (error) {
-      lastError = error as Error;
-      console.error(`Attempt ${attempt} failed:`, error);
-
-      if (attempt < maxRetries) {
-        // Exponential backoff: 1s, 2s, 4s...
-        const delay = Math.pow(2, attempt - 1) * 1000;
-        console.log(`Retrying in ${delay}ms...`);
-        await sleep(delay);
-      }
-    }
-  }
-
-  // All retries failed
-  throw lastError || new Error("Failed to send notification after retries");
-}
-
-/**
- * Sends a notification to a specific device
+ * Sends a push notification when image processing is complete
+ * 
+ * @param deviceToken FCM device token
+ * @param imageUrl URL of the processed image
+ * @param filterType Type of filter applied
+ * @returns Response from FCM API
  */
 export async function sendNotification(
   deviceToken: string,
   imageUrl: string,
   filterType: string
 ): Promise<any> {
-  if (!deviceToken) {
-    console.warn("No device token provided for notification");
-    return null;
-  }
-
-  // Build message payload according to FCM v1 format
-  const messageBody = {
-    message: {
-      token: deviceToken,
-      notification: {
-        title: "Image Ready!",
-        body: `Your ${filterType} filter has been applied successfully.`,
-      },
-      data: {
-        notificationType: "image_ready",
-        imageUrl: imageUrl,
-        filterType: filterType,
-        channelId: "image-processing",
-        experienceId: "@pixmix/filter-frontend",
-        scopeKey: "@pixmix/filter-frontend",
-      },
-      android: {
+  try {
+    // Get FCM authorization token
+    const fcmToken = await getFCMAuthToken();
+    
+    // Build notification payload
+    const message = {
+      message: {
+        token: deviceToken,
         notification: {
-          channel_id: "image-processing",
-          priority: "HIGH",
+          title: "Image Ready!",
+          body: `Your ${filterType} filter has been applied successfully.`,
         },
-      },
-      apns: {
-        payload: {
-          aps: {
-            sound: "default",
-            badge: 1,
+        data: {
+          notificationType: "image_ready",
+          imageUrl: imageUrl,
+          filterType: filterType,
+          timestamp: new Date().toISOString(),
+        },
+        android: {
+          notification: {
+            channel_id: "image-processing",
+            priority: "HIGH",
+            icon: "notification_icon",
+            color: "#0a7ea4",
+          },
+        },
+        apns: {
+          payload: {
+            aps: {
+              badge: 1,
+              sound: "default",
+            },
           },
         },
       },
-    },
-  };
-
-  return sendNotificationWithRetry(messageBody);
+    };
+    
+    // Send notification
+    const response = await fetch(FCM_API_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${fcmToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(message),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`FCM error: ${JSON.stringify(errorData)}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error("Error sending notification:", error);
+    throw error;
+  }
 }
 
 /**
- * Sends a notification to a user by their ID
+ * Store a user's FCM token in the database
+ * 
+ * @param userId User ID
+ * @param fcmToken FCM device token
+ * @param platform Device platform (ios/android)
  */
-export async function sendNotificationToUser(
+export async function storeUserToken(
   userId: string,
-  imageUrl: string,
-  filterType: string
-): Promise<any> {
-  const deviceToken = await getUserToken(userId);
-
-  if (!deviceToken) {
-    throw new Error(`No FCM token found for user ${userId}`);
+  fcmToken: string,
+  platform: string = "ios"
+): Promise<void> {
+  try {
+    // Store in Firestore using the Firebase Admin SDK
+    const { firestore } = require("../config/firebase");
+    
+    await firestore.collection("user_tokens").doc(userId).set(
+      {
+        fcmToken,
+        platform,
+        lastUpdated: new Date(),
+        userId,
+      },
+      { merge: true }
+    );
+    
+    console.log(`Token stored for user ${userId}`);
+  } catch (error) {
+    console.error("Error storing user token:", error);
+    throw error;
   }
-
-  return sendNotification(deviceToken, imageUrl, filterType);
 }
 
-// Export all functions
-export { getFCMAuthToken };
+/**
+ * Retrieve a user's FCM token from the database
+ * 
+ * @param userId User ID
+ * @returns FCM device token
+ */
+export async function getUserToken(userId: string): Promise<string | null> {
+  try {
+    const { firestore } = require("../config/firebase");
+    
+    const doc = await firestore.collection("user_tokens").doc(userId).get();
+    
+    if (doc.exists) {
+      return doc.data().fcmToken;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error("Error getting user token:", error);
+    return null;
+  }
+}

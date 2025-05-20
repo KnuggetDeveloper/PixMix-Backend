@@ -2,9 +2,9 @@ import admin from "firebase-admin";
 import dotenv from "dotenv";
 
 // Load environment variables
-dotenv.config({ path: ".env.production" });
+dotenv.config();
 
-// Check if required Firebase credentials exist
+// Check if Firebase environment variables are set
 const projectId = process.env.FIREBASE_PROJECT_ID;
 const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
 const privateKeyRaw = process.env.FIREBASE_PRIVATE_KEY;
@@ -30,7 +30,9 @@ if (!admin.apps.length) {
         clientEmail,
         privateKey,
       }),
+      storageBucket: `${projectId}.appspot.com`,
     });
+    
     console.log("Firebase Admin SDK initialized successfully");
   } catch (error) {
     console.error("Error initializing Firebase Admin SDK:", error);
@@ -38,5 +40,23 @@ if (!admin.apps.length) {
   }
 }
 
+// Export Firebase services
 export const firestore = admin.firestore();
+export const storage = admin.storage().bucket();
 export const messaging = admin.messaging();
+
+/**
+ * Verify a Firebase ID token
+ * 
+ * @param idToken Firebase ID token to verify
+ * @returns Firebase user data
+ */
+export async function verifyFirebaseIdToken(idToken: string): Promise<admin.auth.DecodedIdToken> {
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    return decodedToken;
+  } catch (error) {
+    console.error("Error verifying Firebase ID token:", error);
+    throw new Error("Invalid Firebase ID token");
+  }
+}
