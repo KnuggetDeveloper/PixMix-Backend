@@ -3,7 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import fs from "fs";
-
+import "./config/firebase"; // Initialize Firebase
 // Routes
 import generateRoute from "./routes/generate";
 
@@ -90,7 +90,7 @@ app.post("/register-token", verifyCloudRunToken, async (req, res, next) => {
   }
 });
 // Start server
-const PORT = process.env.PORT || 8080;
+const PORT = 3000;
 app.listen(PORT, () => {
   console.log(`PixMix Backend running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || "development"}`);

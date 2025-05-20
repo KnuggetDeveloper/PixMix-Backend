@@ -2,6 +2,10 @@ import OpenAI from "openai";
 import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
+import dotenv from "dotenv";
+
+// Load environment variables
+dotenv.config();
 
 // Initialize OpenAI
 const openai = new OpenAI({
