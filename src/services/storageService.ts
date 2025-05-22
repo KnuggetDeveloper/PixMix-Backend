@@ -11,7 +11,7 @@ const storage = new Storage({
   },
 });
 
-const bucketName = process.env.GCS_BUCKET_NAME || "pixmix-6a12e.appspot.com";
+const bucketName = process.env.GCS_BUCKET_NAME || "pixmix-6a12e.firebasestorage.app";
 const bucket = storage.bucket(bucketName);
 
 /**

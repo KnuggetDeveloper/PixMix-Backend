@@ -90,7 +90,7 @@ app.post("/register-token", verifyCloudRunToken, async (req, res, next) => {
   }
 });
 // Start server
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`PixMix Backend running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
